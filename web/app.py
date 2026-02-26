@@ -51,6 +51,7 @@ class TaskRequest(BaseModel):
 class NovelSubmission(BaseModel):
     account: str
     content: str
+    style: str = "anime"
 
 from fastapi.responses import Response
 
@@ -182,16 +183,17 @@ async def run_task(task: TaskRequest, background_tasks: BackgroundTasks):
 async def upload_novel(req: NovelSubmission, background_tasks: BackgroundTasks):
     text = req.content.strip()
     account = req.account.strip()
+    style = req.style
     if not text:
         return {"status": "error", "message": "文章内容为空！"}
     
     async def process_and_queue():
         try:
             # use asyncio.to_thread because process_novel_to_feishu has blocking requests and sleeps
-            res = await asyncio.to_thread(process_novel_to_feishu, text)
+            res = await asyncio.to_thread(process_novel_to_feishu, text, style_key=style)
             if res.get("status") == "success" and res.get("prompts"):
                 prompts = res.get("prompts", [])
-                logger.info(f"✨ 拆解完成，获取到 {len(prompts)} 个分镜，准备自动入列视频生成！")
+                logger.info(f"✨ 拆解完成 (风格: {style})，获取到 {len(prompts)} 个分镜，准备自动入列视频生成！")
                 await run_pipeline_task(account, prompts)
             else:
                 logger.error("❌ 拆解失败或没有获取到分镜。")
@@ -199,8 +201,8 @@ async def upload_novel(req: NovelSubmission, background_tasks: BackgroundTasks):
             logger.error(f"DeepSeek 队列处理发生异常: {e}")
 
     background_tasks.add_task(process_and_queue)
-    logger.info(f"📚 已在后台开启【闪电解文】线程，文本长度：{len(text)}")
-    return {"status": "ok", "message": "文章已交由 DeepSeek AI 处理并在成功后自动触发视频生成！"}
+    logger.info(f"📚 已在后台开启【闪电解文】线程 (风格: {style})，文本长度：{len(text)}")
+    return {"status": "ok", "message": f"文章已交由 DeepSeek AI 处理（模式：{style}）并在成功后自动触发视频生成！"}
 
 if __name__ == "__main__":
     try:

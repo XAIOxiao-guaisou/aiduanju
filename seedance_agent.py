@@ -137,6 +137,38 @@ class SeedanceVisualAgent:
             print(f"❌ [Seedance] 登录过程异常: {e}")
         finally:
             await self.close()
+
+    async def smart_click(self, selector: str, label: str = "元素", timeout: int = 3000):
+        """
+        混合定位：尝试获取 DOM 元素的边界框，然后模拟真人鼠标移动到中心点并带随机偏移点击。
+        这样即使 UI 存在一定程度的覆盖或重叠，只要坐标在视口内通常也能触发。
+        """
+        import random
+        try:
+            element = self.page.locator(selector).last
+            if await element.is_visible(timeout=timeout):
+                box = await element.bounding_box()
+                if box:
+                    # 模拟真人移动到中心点并带随机偏移
+                    x = box['x'] + box['width'] / 2 + random.randint(-5, 5)
+                    y = box['y'] + box['height'] / 2 + random.randint(-5, 5)
+                    logger.info(f"SmartClick: 模拟点击 {label} 坐标 ({x:.1f}, {y:.1f})")
+                    await self.page.mouse.move(x, y, steps=10)
+                    await self.page.mouse.down()
+                    await self.page.wait_for_timeout(random.randint(50, 150))
+                    await self.page.mouse.up()
+                    return True
+        except Exception as e:
+            logger.warning(f"SmartClick: 视觉坐标点击 [{label}] 失败: {e}")
+            
+        # Fallback to standard Playwright click if bounding box fails or element isn't strictly visible but might be clickable
+        try:
+            element = self.page.locator(selector).last
+            await element.click(force=True, timeout=timeout)
+            logger.info(f"SmartClick: 回退至强制 DOM 点击 [{label}] 成功")
+            return True
+        except Exception:
+            return False
             
     async def submit_video_generation(self, prompt: str):
         """
@@ -217,18 +249,13 @@ class SeedanceVisualAgent:
             
             logger.info("Clicking the '生成' button...")
             
-            # In Volcengine, it's a primary button containing "生成"
-            try:
-                # 尝试更宽泛的选择器，并使用 force=True 穿透可能的遮挡
-                generate_btn = self.page.locator('button.arco-btn-primary', has_text="生成").last
-                if await generate_btn.is_visible(timeout=3000):
-                    await generate_btn.click(force=True, timeout=5000)
-                else:
-                    # 尝试找带有特定 aria 标签或其他特征的按钮
-                    generate_btn = self.page.locator('button:has-text("生成")').last
-                    await generate_btn.click(force=True, timeout=5000)
-            except Exception as e2:
-                logger.warning(f"Failed to find or click primary button '生成': {e2}")
+            # Use the new smart click fallback logic
+            success = await self.smart_click('button.arco-btn-primary:has-text("生成")', "主生成按钮", timeout=3000)
+            if not success:
+                success = await self.smart_click('button:has-text("生成")', "备用生成按钮", timeout=3000)
+                
+            if not success:
+                logger.warning("Failed to find or click primary button '生成' via UI")
                 # Fallback to pressing Control+Enter which is common in professional dashboards
                 logger.info("Fallback: Pressing Control+Enter...")
                 await self.page.keyboard.press("Control+Enter")

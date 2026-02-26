@@ -68,6 +68,21 @@ if DEEPSEEK_API_KEY:
         "name": "DeepSeek Official (付费保底)"
     })
 
+# ---------------------------------------------------------
+# Style Presets
+# ---------------------------------------------------------
+STYLE_PRESETS = {
+    "realistic": {
+        "name": "电影感真人风格",
+        "visual_style": "High-end cinematic, photorealistic, shot on Hasselblad H6D, 80mm, f/2.8, Rembrandt lighting, 8k resolution, quiet luxury texture, real-world physics.",
+        "negative_prompt": "anime, cartoon, illustration, drawing, 2D, fake, plastic texture."
+    },
+    "anime": {
+        "name": "高品质动漫风格",
+         "visual_style": "High-quality Anime style, Makoto Shinkai style, extreme details, 8k resolution, vibrant colors, expressive character movements, highly coherent scenes, NO photorealism.",
+        "negative_prompt": "photorealistic, real person, 3D render, noisy texture, blurry background."
+    }
+}
 
 def call_openai_compatible_api(base_url: str, api_key: str, model: str, message: str, timeout: int = 150):
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -377,25 +392,28 @@ def extract_characters(text):
     parsed = extract_json_from_deepseek(result_text)
     return parsed if (isinstance(parsed, list) and len(parsed) > 0 and "name" in parsed[0]) else []
 
-def generate_scenes_for_chunk(chunk_text, style_ref):
+def generate_scenes_for_chunk(chunk_text, style_ref, style_key="anime"):
+    preset = STYLE_PRESETS.get(style_key, STYLE_PRESETS["anime"])
+
     prompt = f"""# Role
 你是一名资深的 AI 短剧导演，擅长将长篇小说转化为高审美、叙事连贯的 15s 短剧脚本。
 
 # Goals
 将输入的【小说文本】拆解为一系列连贯的 15s 视频指令。
-确保同一章节内的：人物形象一致、环境氛围一致、视觉风格极其连贯！必须确保动作的起承转合自然。
+确保同一章节内的视觉风格极其连贯！必须确保动作的起承转合自然：{preset['name']}。
 
 # Constraints
 1. **时长逻辑**：每个 Scene 预估 15s。要求将每个 Scene 拆解为 3 个连续的【子镜头】。
 2. **角色一致性**：
    - [人类]：需固定特征（如：{style_ref}）。
    - [非人实体/动物/怪兽]：需明确物种特征。
-3. **输出格式**：严格返回纯 JSON 数组，不带 markdown 代码块标记，用于外部系统解析。
-4. **动漫风格**：请在视觉提示词中强力加入“高品质动漫风格 (High-quality anime style)”。
+3. **风格要求**：{preset['visual_style']}
+4. **负面约束**：{preset['negative_prompt']}
+5. **输出格式**：严格返回纯 JSON 数组，不带 markdown 代码块标记，用于外部系统解析。
 
 # Global Visual Style
 - Camera: Shot on Hasselblad H6D, 80mm, f/2.8.
-- Aesthetics: High-quality Anime style, Makoto Shinkai style, extreme details, 8k resolution, highly coherent scenes. NO photorealism.
+- Aesthetics: {preset['visual_style']}
 
 # Input Text
 \"\"\"
@@ -415,7 +433,7 @@ def generate_scenes_for_chunk(chunk_text, style_ref):
     "entities": [
       {{"name": "角色A", "type": "怪兽/人类", "visual_anchor": "固定特征描述"}}
     ],
-    "master_prompt": "High-quality anime style, [合并上方子镜头核心画面的英文描述, 强调动作和环境的连续性], --ar 16:9",
+    "master_prompt": "{preset['visual_style']}, [合并上方子镜头核心画面的英文描述, 强调动作和环境的连续性], --ar 16:9",
     "audio_plan": "背景音：[具体描述]; 旁白内容：[文字]"
   }}
 ]
@@ -435,8 +453,8 @@ def generate_scenes_for_chunk(chunk_text, style_ref):
         time.sleep(2)
     return []
 
-def process_novel_to_feishu(novel_text: str):
-    logger.info("======== 开始小说全自动上云飞书 (DeepSeek) ========")
+def process_novel_to_feishu(novel_text: str, style_key: str = "anime"):
+    logger.info(f"======== 开始小说全自动上云飞书 (DeepSeek, Style: {style_key}) ========")
     bitable = FeishuBitableManager()
     
     # 1. 彻底清空三张表
@@ -467,7 +485,7 @@ def process_novel_to_feishu(novel_text: str):
     
     for idx, chunk in enumerate(chunks):
         logger.info(f"🧠 [正在分析 {idx+1}/{len(chunks)} 块...]")
-        scenes = generate_scenes_for_chunk(chunk, style_ref)
+        scenes = generate_scenes_for_chunk(chunk, style_ref, style_key=style_key)
         if scenes:
              all_scenes.extend(scenes)
              logger.info(f"✅ 第{idx+1}块完成，累积分镜: {len(all_scenes)} 个")
